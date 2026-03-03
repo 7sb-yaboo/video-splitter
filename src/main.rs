@@ -207,7 +207,7 @@ fn run(cli: Cli) -> Result<()> {
     }
 
     // 候補をソートして近傍重複を除去（1秒未満の間隔は同一点とみなす）
-    candidates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    candidates.sort_by(|a, b| a.total_cmp(b));
     candidates = dedup_nearby(candidates, 1.0);
 
     // 分割ポイントの決定
@@ -361,8 +361,7 @@ mod tests {
     fn test_dedup_nearby() {
         let v = vec![1.0, 1.3, 1.8, 3.0, 3.5, 10.0];
         let result = dedup_nearby(v, 1.0);
-        // 1.0 は残る、1.3 は除外（差0.3 < 1.0）、1.8 は残る（差0.5 < 1.0... wait 1.8-1.0=0.8 < 1.0 → 除外）
-        // let me recalculate:
+        // 各要素の処理:
         // 1.0 → result=[1.0], last=1.0
         // 1.3: 1.3-1.0=0.3 < 1.0 → skip
         // 1.8: 1.8-1.0=0.8 < 1.0 → skip

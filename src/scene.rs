@@ -47,7 +47,7 @@ fn parse_scene_timestamps(stderr: &str) -> Result<Vec<f64>> {
         }
     }
 
-    timestamps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    timestamps.sort_by(|a, b| a.total_cmp(b));
     Ok(timestamps)
 }
 

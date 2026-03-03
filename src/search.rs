@@ -139,6 +139,44 @@ mod tests {
     }
 
     #[test]
+    fn test_search_transcript_vtt() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+
+        // VTT ファイル（タイムスタンプに `.` を使う）
+        let vtt = "WEBVTT\n\n\
+                   1\n00:00:02.000 --> 00:00:04.000\n画面を録画します\n\n\
+                   2\n00:00:06.500 --> 00:00:08.000\n別のシーン\n\n";
+        write_file(dir, "seg_001.vtt", vtt);
+
+        let manifest_json = serde_json::json!({
+            "source": "test.mp4",
+            "total_duration": 120.0,
+            "language": "ja",
+            "segments": [
+                {
+                    "index": 1,
+                    "start": 300.0,
+                    "end": 400.0,
+                    "video": "seg_001.mp4",
+                    "transcript": "seg_001.vtt",
+                    "key_frames": []
+                }
+            ]
+        });
+        let manifest_path = dir.join("manifest.json");
+        std::fs::write(&manifest_path, manifest_json.to_string()).unwrap();
+
+        let results = search_transcript(&manifest_path, "録画").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].segment_index, 1);
+        assert_eq!(results[0].segment_timestamp_ms, 2_000);
+        // 300s * 1000 + 2000ms = 302_000
+        assert_eq!(results[0].absolute_timestamp_ms, 302_000);
+        assert!(results[0].text.contains("録画"));
+    }
+
+    #[test]
     fn test_search_transcript_no_match() {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path();

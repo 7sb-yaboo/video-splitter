@@ -198,9 +198,10 @@ pub fn parse_srt(content: &str) -> Vec<SrtEntry> {
     entries
 }
 
-/// "HH:MM:SS,mmm" 形式のタイムスタンプをミリ秒に変換する
+/// "HH:MM:SS,mmm"（SRT）または "HH:MM:SS.mmm"（VTT）形式のタイムスタンプをミリ秒に変換する
 fn parse_timestamp(s: &str) -> Option<u64> {
-    let (hms, ms_str) = s.trim().split_once(',')?;
+    let s = s.trim();
+    let (hms, ms_str) = s.split_once(',').or_else(|| s.split_once('.'))?;
     let ms: u64 = ms_str.trim().parse().ok()?;
 
     let parts: Vec<&str> = hms.split(':').collect();
