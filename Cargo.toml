@@ -2,6 +2,9 @@
 name = "video-splitter"
 version = "0.1.0"
 edition = "2021"
+description = "CLI tool to split videos at silence boundaries with built-in transcription (whisper-rs) and MCP server support"
+license = "MIT"
+repository = "https://github.com/7sb-yaboo/video-splitter"
 
 [[bin]]
 name = "video-splitter"
