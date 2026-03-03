@@ -24,10 +24,10 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact_name: video-splitter
             asset_name: video-splitter-x86_64-linux
-          - os: macos-14
-            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
             artifact_name: video-splitter
-            asset_name: video-splitter-aarch64-macos
+            asset_name: video-splitter-x86_64-macos
 
     steps:
       - uses: actions/checkout@v4
@@ -50,11 +50,11 @@ jobs:
 
       # ── macOS ─────────────────────────────────────────────────
       - name: Install LLVM & CMake (macOS)
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-13'
         run: brew install llvm cmake
 
       - name: Set LIBCLANG_PATH (macOS)
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-13'
         run: echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
 
       # ── Rust ──────────────────────────────────────────────────
