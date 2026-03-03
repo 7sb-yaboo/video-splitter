@@ -1,6 +1,6 @@
 [package]
 name = "video-splitter"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "CLI tool to split videos at silence boundaries with built-in transcription (whisper-rs) and MCP server support"
 license = "MIT"
