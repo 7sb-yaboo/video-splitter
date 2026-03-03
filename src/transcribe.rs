@@ -158,7 +158,7 @@ pub fn write_transcript(entries: &[SrtEntry], path: &Path, format: &str) -> Resu
 // --- 内部ユーティリティ ---
 
 /// SRT テキストをパースして SrtEntry のリストを返す
-fn parse_srt(content: &str) -> Vec<SrtEntry> {
+pub fn parse_srt(content: &str) -> Vec<SrtEntry> {
     // Windows 改行を正規化
     let content = content.replace("\r\n", "\n");
     let mut entries = Vec::new();

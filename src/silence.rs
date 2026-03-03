@@ -81,23 +81,35 @@ fn parse_silence_intervals(stderr: &str) -> Result<Vec<SilenceInterval>> {
 
 /// ターゲット時刻に最も近い無音区間の中間点を返す
 /// 探索範囲内に候補がなければ None を返す
+#[allow(dead_code)]
 pub fn find_nearest_split_point(
     intervals: &[SilenceInterval],
+    target: f64,
+    search_window: f64,
+) -> Option<f64> {
+    let candidates: Vec<f64> = intervals.iter().map(|iv| iv.midpoint()).collect();
+    find_nearest_candidate(&candidates, target, search_window)
+}
+
+/// 候補タイムスタンプのリストから、ターゲット時刻に最も近い候補を返す
+/// `[target - search_window, target + search_window]` の範囲外は無視する
+pub fn find_nearest_candidate(
+    candidates: &[f64],
     target: f64,
     search_window: f64,
 ) -> Option<f64> {
     let lower = target - search_window;
     let upper = target + search_window;
 
-    intervals
+    candidates
         .iter()
-        .filter(|iv| iv.midpoint() >= lower && iv.midpoint() <= upper)
-        .min_by(|a, b| {
-            let da = (a.midpoint() - target).abs();
-            let db = (b.midpoint() - target).abs();
+        .filter(|&&t| t >= lower && t <= upper)
+        .min_by(|&&a, &&b| {
+            let da = (a - target).abs();
+            let db = (b - target).abs();
             da.partial_cmp(&db).unwrap()
         })
-        .map(|iv| iv.midpoint())
+        .copied()
 }
 
 #[cfg(test)]
@@ -141,5 +153,20 @@ mod tests {
         // target=600, window=60 -> 候補なし
         let point = find_nearest_split_point(&intervals, 600.0, 60.0);
         assert!(point.is_none());
+    }
+
+    #[test]
+    fn test_find_nearest_candidate() {
+        let candidates = vec![50.0, 100.0, 150.0, 200.0];
+        // target=105, window=60 -> [45, 165] 内: 50, 100, 150 -> 100 が最近傍
+        let result = find_nearest_candidate(&candidates, 105.0, 60.0);
+        assert!(result.is_some());
+        assert!((result.unwrap() - 100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_find_nearest_candidate_empty() {
+        let result = find_nearest_candidate(&[], 100.0, 30.0);
+        assert!(result.is_none());
     }
 }

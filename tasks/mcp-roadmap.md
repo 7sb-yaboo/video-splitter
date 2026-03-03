@@ -133,14 +133,14 @@ search_transcript("/path/to/manifest.json", "ファイルを保存")
 
 ### タスク
 
-- [ ] `src/scene.rs` 新規作成
+- [x] `src/scene.rs` 新規作成
   - `detect_scene_changes(ffmpeg, input, threshold, verbose) -> Result<Vec<f64>>`
   - `ffmpeg -i input.mp4 -vf "select=gt(scene\,{t}),showinfo" -f null -` の stderr をパース
-- [ ] `src/main.rs` に CLI オプション追加
+- [x] `src/main.rs` に CLI オプション追加
   - `--split-on-scene` (bool, default: false)
   - `--scene-threshold` (f64, default: 0.4)
-- [ ] 分割ポイントのマージロジック: 無音区間 ∪ シーン変化点（近傍の重複を除去）
-- [ ] `cargo test` パス確認
+- [x] 分割ポイントのマージロジック: 無音区間 ∪ シーン変化点（近傍の重複を除去）
+- [x] `cargo test` パス確認（20 tests passed）
 
 ---
 
@@ -150,11 +150,14 @@ search_transcript("/path/to/manifest.json", "ファイルを保存")
 
 ### タスク
 
-- [ ] `src/search.rs` 新規作成
-  - `search(manifest, query) -> Result<Vec<SearchHit>>`
-  - `SearchHit { segment_index, start_ms, end_ms, context_text }`
-- [ ] CLI オプション追加（`--search <query>`）または MCP ツール専用として実装
-- [ ] 検索結果のソート（関連度 / 時系列）
+- [x] `src/search.rs` 新規作成
+  - `search_transcript(manifest_path, query) -> Result<Vec<SearchResult>>`
+  - `SearchResult { segment_index, segment_timestamp_ms, absolute_timestamp_ms, text }`
+- [x] `src/manifest.rs` に `Deserialize` トレイト追加
+- [x] `src/transcribe.rs` の `parse_srt` を `pub` に変更（search.rs から再利用）
+- [x] CLI オプション追加（`--search <QUERY>`）
+- [x] 検索結果のソート（時系列・absolute_timestamp_ms 昇順）
+- [x] `cargo test` パス確認（20 tests passed）
 
 ---
 

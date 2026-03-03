@@ -1,5 +1,7 @@
 mod frames;
 mod manifest;
+mod scene;
+mod search;
 mod silence;
 mod split;
 mod transcribe;
@@ -12,7 +14,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(name = "video-splitter", version, about, long_about = None)]
 struct Cli {
-    /// 入力動画ファイル
+    /// 入力動画ファイル（または --search 使用時は manifest.json パス）
     input: PathBuf,
 
     /// 分割間隔（秒）
@@ -79,11 +81,27 @@ struct Cli {
     #[arg(long, default_value_t = 30.0)]
     frames_interval: f64,
 
+    // ── シーン変化分割 ──────────────────────────────────────────────────────
+
+    /// シーン変化点も分割候補に加える
+    #[arg(long)]
+    split_on_scene: bool,
+
+    /// シーン変化検出の閾値（0.0〜1.0）
+    #[arg(long, default_value_t = 0.4)]
+    scene_threshold: f64,
+
     // ── マニフェスト ────────────────────────────────────────────────────────
 
     /// 処理結果をまとめた manifest.json を出力先に生成する
     #[arg(long)]
     manifest: bool,
+
+    // ── 検索 ────────────────────────────────────────────────────────────────
+
+    /// manifest.json からトランスクリプトを横断検索する（INPUT を manifest.json パスとして扱う）
+    #[arg(long)]
+    search: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -92,6 +110,18 @@ fn main() -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    // ── 検索モード ──────────────────────────────────────────────────────────
+    if let Some(ref query) = cli.search {
+        if !cli.input.exists() {
+            bail!("manifest.json が見つかりません: {}", cli.input.display());
+        }
+        let results = search::search_transcript(cli.input.as_path(), query)?;
+        println!("{}", serde_json::to_string_pretty(&results)?);
+        return Ok(());
+    }
+
+    // ── 動画処理モード ──────────────────────────────────────────────────────
+
     // 入力ファイルの存在確認
     if !cli.input.exists() {
         bail!("入力ファイルが見つかりません: {}", cli.input.display());
@@ -154,13 +184,39 @@ fn run(cli: Cli) -> Result<()> {
     )?;
     println!("  Found {} silence interval(s)", silence_intervals.len());
 
+    // 無音区間の中間点を候補プールに追加
+    let mut candidates: Vec<f64> = silence_intervals.iter().map(|iv| iv.midpoint()).collect();
+
+    // シーン変化点を候補プールに追加
+    if cli.split_on_scene {
+        println!("Detecting scene changes...");
+        match scene::detect_scene_changes(
+            &cli.ffmpeg,
+            input_str,
+            cli.scene_threshold,
+            cli.verbose,
+        ) {
+            Ok(scene_times) => {
+                println!("  Found {} scene change(s)", scene_times.len());
+                candidates.extend(scene_times);
+            }
+            Err(e) => {
+                eprintln!("  Warning: シーン変化検出をスキップしました: {}", e);
+            }
+        }
+    }
+
+    // 候補をソートして近傍重複を除去（1秒未満の間隔は同一点とみなす）
+    candidates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    candidates = dedup_nearby(candidates, 1.0);
+
     // 分割ポイントの決定
     let mut split_points: Vec<f64> = Vec::new();
     let mut target = cli.duration;
 
     while target < total_duration {
         let point =
-            silence::find_nearest_split_point(&silence_intervals, target, cli.search_window)
+            silence::find_nearest_candidate(&candidates, target, cli.search_window)
                 .unwrap_or(target);
         split_points.push(point);
         target = point + cli.duration;
@@ -284,4 +340,48 @@ fn run(cli: Cli) -> Result<()> {
 
     println!("Done! {} file(s) created in: {}", total_segments, output_dir.display());
     Ok(())
+}
+
+/// ソート済みリストから min_gap 未満の間隔の要素を除外する
+fn dedup_nearby(sorted: Vec<f64>, min_gap: f64) -> Vec<f64> {
+    let mut result: Vec<f64> = Vec::new();
+    for val in sorted {
+        if result.last().map_or(true, |&last| val - last >= min_gap) {
+            result.push(val);
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dedup_nearby() {
+        let v = vec![1.0, 1.3, 1.8, 3.0, 3.5, 10.0];
+        let result = dedup_nearby(v, 1.0);
+        // 1.0 は残る、1.3 は除外（差0.3 < 1.0）、1.8 は残る（差0.5 < 1.0... wait 1.8-1.0=0.8 < 1.0 → 除外）
+        // let me recalculate:
+        // 1.0 → result=[1.0], last=1.0
+        // 1.3: 1.3-1.0=0.3 < 1.0 → skip
+        // 1.8: 1.8-1.0=0.8 < 1.0 → skip
+        // 3.0: 3.0-1.0=2.0 >= 1.0 → result=[1.0, 3.0], last=3.0
+        // 3.5: 3.5-3.0=0.5 < 1.0 → skip
+        // 10.0: 10.0-3.0=7.0 >= 1.0 → result=[1.0, 3.0, 10.0]
+        assert_eq!(result, vec![1.0, 3.0, 10.0]);
+    }
+
+    #[test]
+    fn test_dedup_nearby_empty() {
+        let result = dedup_nearby(vec![], 1.0);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_dedup_nearby_no_duplicates() {
+        let v = vec![1.0, 5.0, 10.0];
+        let result = dedup_nearby(v.clone(), 1.0);
+        assert_eq!(result, v);
+    }
 }

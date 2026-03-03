@@ -1,9 +1,9 @@
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// 処理結果の全体メタデータ
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Manifest {
     pub source: String,
     pub total_duration: f64,
@@ -12,7 +12,7 @@ pub struct Manifest {
 }
 
 /// セグメントごとのメタデータ（パスはすべて manifest.json からの相対パス）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SegmentMeta {
     pub index: usize,
     pub start: f64,
