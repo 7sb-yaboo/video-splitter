@@ -1,3 +1,5 @@
+mod frames;
+mod manifest;
 mod silence;
 mod split;
 mod transcribe;
@@ -41,6 +43,8 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
+    // ── 文字起こし ──────────────────────────────────────────────────────────
+
     /// 文字起こしを有効にする（--whisper-model が必須）
     #[arg(long)]
     transcribe: bool,
@@ -60,6 +64,26 @@ struct Cli {
     /// 文字起こし出力形式（txt / srt / vtt）
     #[arg(long, default_value = "txt")]
     transcribe_format: String,
+
+    // ── キーフレーム抽出 ────────────────────────────────────────────────────
+
+    /// キーフレーム抽出を有効にする
+    #[arg(long)]
+    extract_frames: bool,
+
+    /// シーン変化検出の感度（0.0〜1.0、値が大きいほど変化が大きい場面のみ検出）
+    #[arg(long, default_value_t = 0.3)]
+    frames_scene_threshold: f64,
+
+    /// シーン変化が検出されなかった場合のフォールバック間隔（秒、0.0 = 無効）
+    #[arg(long, default_value_t = 30.0)]
+    frames_interval: f64,
+
+    // ── マニフェスト ────────────────────────────────────────────────────────
+
+    /// 処理結果をまとめた manifest.json を出力先に生成する
+    #[arg(long)]
+    manifest: bool,
 }
 
 fn main() -> Result<()> {
@@ -135,8 +159,9 @@ fn run(cli: Cli) -> Result<()> {
     let mut target = cli.duration;
 
     while target < total_duration {
-        let point = silence::find_nearest_split_point(&silence_intervals, target, cli.search_window)
-            .unwrap_or(target);
+        let point =
+            silence::find_nearest_split_point(&silence_intervals, target, cli.search_window)
+                .unwrap_or(target);
         split_points.push(point);
         target = point + cli.duration;
     }
@@ -152,19 +177,26 @@ fn run(cli: Cli) -> Result<()> {
     println!("Splitting into {} segment(s)...", total_segments);
 
     // 文字起こし: 動画全体を1回だけ whisper で処理し SRT エントリを取得する
-    // セグメントごとの個別実行ではなく、タイムスタンプで後からスライスする
     let srt_entries = if cli.transcribe {
         let model = cli.whisper_model.as_deref().unwrap();
         println!("Transcribing full video (1 pass)...");
-        let entries =
-            transcribe::transcribe_full(&cli.ffmpeg, &cli.whisper, model, input_str, &cli.language, cli.verbose)?;
+        let entries = transcribe::transcribe_full(
+            &cli.ffmpeg,
+            &cli.whisper,
+            model,
+            input_str,
+            &cli.language,
+            cli.verbose,
+        )?;
         println!("  -> OK: {} entries", entries.len());
         Some(entries)
     } else {
         None
     };
 
-    // 各セグメントをカット、文字起こしが有効な場合は SRT をスライスして書き出す
+    // 各セグメントをカット → 文字起こしスライス → キーフレーム抽出
+    let mut segment_metas: Vec<manifest::SegmentMeta> = Vec::new();
+
     for segment in &segments {
         println!(
             "[{}/{}] Cutting: {} ({:.1}s - {:.1}s)",
@@ -178,12 +210,76 @@ fn run(cli: Cli) -> Result<()> {
         split::cut_segment(&cli.ffmpeg, input_str, segment, cli.verbose)?;
         println!("  -> OK: {}", segment.output_path.display());
 
-        if let Some(ref entries) = srt_entries {
+        // 文字起こしスライス
+        let transcript_path: Option<std::path::PathBuf> = if let Some(ref entries) = srt_entries {
             let sliced = transcribe::slice_srt(entries, segment.start, segment.end);
-            let transcript_path = segment.output_path.with_extension(&cli.transcribe_format);
-            transcribe::write_transcript(&sliced, &transcript_path, &cli.transcribe_format)?;
-            println!("  -> OK: {} ({} entries)", transcript_path.display(), sliced.len());
+            let path = segment.output_path.with_extension(&cli.transcribe_format);
+            transcribe::write_transcript(&sliced, &path, &cli.transcribe_format)?;
+            println!("  -> OK: {} ({} entries)", path.display(), sliced.len());
+            Some(path)
+        } else {
+            None
+        };
+
+        // キーフレーム抽出
+        let frame_paths: Vec<std::path::PathBuf> = if cli.extract_frames {
+            match frames::extract_key_frames(
+                &cli.ffmpeg,
+                &segment.output_path,
+                cli.frames_scene_threshold,
+                cli.frames_interval,
+                cli.verbose,
+            ) {
+                Ok(paths) => {
+                    let frames_dir = segment
+                        .output_path
+                        .parent()
+                        .unwrap()
+                        .join(format!(
+                            "{}_frames",
+                            segment.output_path.file_stem().unwrap().to_string_lossy()
+                        ));
+                    println!("  -> OK: {}/ ({} frames)", frames_dir.display(), paths.len());
+                    paths
+                }
+                Err(e) => {
+                    eprintln!("  Warning: フレーム抽出をスキップしました: {}", e);
+                    vec![]
+                }
+            }
+        } else {
+            vec![]
+        };
+
+        // マニフェスト用データ収集
+        if cli.manifest {
+            segment_metas.push(manifest::SegmentMeta {
+                index: segment.index,
+                start: segment.start,
+                end: segment.end,
+                video: manifest::to_relative(&segment.output_path, &output_dir),
+                transcript: transcript_path
+                    .as_deref()
+                    .map(|p| manifest::to_relative(p, &output_dir)),
+                key_frames: frame_paths
+                    .iter()
+                    .map(|p| manifest::to_relative(p, &output_dir))
+                    .collect(),
+            });
         }
+    }
+
+    // マニフェスト書き出し
+    if cli.manifest {
+        let manifest_data = manifest::Manifest {
+            source: input_str.to_string(),
+            total_duration,
+            language: cli.language.clone(),
+            segments: segment_metas,
+        };
+        let manifest_path = output_dir.join("manifest.json");
+        manifest::write_manifest(&manifest_data, &manifest_path)?;
+        println!("Manifest: {}", manifest_path.display());
     }
 
     println!("Done! {} file(s) created in: {}", total_segments, output_dir.display());
