@@ -57,10 +57,11 @@ pub fn transcribe_full(
         );
     }
 
-    // Step 2: ファイルを読み込み Vec<f32> に変換
-    let bytes = std::fs::read(&tmp_f32)
-        .with_context(|| format!("f32 ファイルの読み込みに失敗しました: {}", tmp_f32.display()))?;
+    // Step 2: ファイルを読み込み Vec<f32> に変換（読み込み失敗時もファイルを削除する）
+    let bytes = std::fs::read(&tmp_f32);
     let _ = std::fs::remove_file(&tmp_f32);
+    let bytes = bytes
+        .with_context(|| format!("f32 ファイルの読み込みに失敗しました: {}", tmp_f32.display()))?;
 
     let samples: Vec<f32> = bytes
         .chunks_exact(4)
