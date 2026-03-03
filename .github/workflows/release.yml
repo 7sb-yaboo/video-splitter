@@ -24,10 +24,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact_name: video-splitter
             asset_name: video-splitter-x86_64-linux
-          - os: macos-14
-            target: x86_64-apple-darwin
-            artifact_name: video-splitter
-            asset_name: video-splitter-x86_64-macos
+          # macOS: whisper-rs-sys v0.14 has a struct size mismatch with macOS runners.
+          # Build from source on macOS: see README for instructions.
 
     steps:
       - uses: actions/checkout@v4
@@ -47,15 +45,6 @@ jobs:
       - name: Install LLVM & CMake (Linux)
         if: matrix.os == 'ubuntu-22.04'
         run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake
-
-      # ── macOS ─────────────────────────────────────────────────
-      - name: Install LLVM & CMake (macOS)
-        if: matrix.os == 'macos-14'
-        run: brew install llvm cmake
-
-      - name: Set LIBCLANG_PATH (macOS)
-        if: matrix.os == 'macos-14'
-        run: echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
 
       # ── Rust ──────────────────────────────────────────────────
       - name: Install Rust toolchain
