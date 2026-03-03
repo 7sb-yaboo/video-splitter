@@ -24,18 +24,20 @@ cargo build --release
 # バイナリ: target/release/video-splitter
 ```
 
-## 2. Whisper モデルファイルの取得
+## 2. Whisper モデルの取得
+
+`scripts/download_model.py` を使って対話的にダウンロードできます（推奨）:
 
 ```bash
-# 小型モデル（高速・精度普通）
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+# モデル一覧を確認
+python .claude/skills/summarize-video/scripts/download_model.py --list
 
-# 中型モデル（バランス型・推奨）
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
-
-# 大型モデル（最高精度・低速）
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
+# medium モデルをダウンロード（~/.cache/whisper/ に保存）
+python .claude/skills/summarize-video/scripts/download_model.py --model medium
 ```
+
+手動でダウンロードする場合は `https://huggingface.co/ggerganov/whisper.cpp/` から
+目的のモデルファイル（`.bin`）を取得してください。
 
 ## 3. FFmpeg の確認
 

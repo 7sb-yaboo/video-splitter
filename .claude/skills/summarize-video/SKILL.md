@@ -29,8 +29,30 @@ ffmpeg -version
 ### Step 1: 情報収集
 
 - 動画ファイルのパスを確認する
-- Whisper モデルファイルのパスをユーザーに確認する（未指定の場合）
+- Whisper モデルを確認する（下記フロー）
 - 出力先ディレクトリを決める（省略時: 動画と同じ場所）
+
+#### Whisper モデルの確認フロー
+
+1. ユーザーがモデルパスを指定済みかつファイルが存在する → そのまま使用
+2. 未指定またはファイルが存在しない → 以下の候補をユーザーに提示する:
+
+| モデル | ファイル名 | サイズ | 特徴 |
+|--------|-----------|--------|------|
+| tiny | ggml-tiny.bin | ~75MB | 最高速・低精度 |
+| base | ggml-base.bin | ~148MB | 高速・普通精度 |
+| small | ggml-small.bin | ~488MB | バランス型 |
+| **medium（推奨）** | ggml-medium.bin | ~1.5GB | 高精度・日本語に最適 |
+| large-v3 | ggml-large-v3.bin | ~3.1GB | 最高精度・低速 |
+
+3. ユーザーが選択したら `scripts/download_model.py` でダウンロードする:
+
+```bash
+# スクリプトは保存先パスを stdout に出力する
+python .claude/skills/summarize-video/scripts/download_model.py --model <選択名> --quiet
+```
+
+4. 出力されたパスを `--whisper-model` に使用する
 
 ### Step 2: 動画を処理する
 
