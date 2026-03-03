@@ -51,10 +51,6 @@ struct Cli {
     #[arg(long)]
     transcribe: bool,
 
-    /// whisper.cpp 実行ファイルパス
-    #[arg(long, default_value = "whisper-cpp", env = "WHISPER_PATH")]
-    whisper: String,
-
     /// モデルファイルパス（--transcribe 時は必須）
     #[arg(long)]
     whisper_model: Option<PathBuf>,
@@ -155,7 +151,6 @@ fn run(cli: Cli) -> Result<()> {
         if cli.whisper_model.is_none() {
             bail!("--transcribe を使用する場合は --whisper-model でモデルファイルパスを指定してください");
         }
-        transcribe::validate_whisper(&cli.whisper)?;
     }
 
     // 動画の総時間取得
@@ -238,7 +233,6 @@ fn run(cli: Cli) -> Result<()> {
         println!("Transcribing full video (1 pass)...");
         let entries = transcribe::transcribe_full(
             &cli.ffmpeg,
-            &cli.whisper,
             model,
             input_str,
             &cli.language,

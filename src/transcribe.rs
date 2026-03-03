@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 /// SRT エントリ（1つの字幕ブロック）
 #[derive(Debug, Clone)]
@@ -10,120 +11,106 @@ pub struct SrtEntry {
     pub text: String,
 }
 
-/// whisper.cpp が実行可能か確認する
-pub fn validate_whisper(whisper: &str) -> Result<()> {
-    Command::new(whisper)
-        .arg("--help")
-        .output()
-        .with_context(|| {
-            format!(
-                "whisper.cpp が見つかりません: '{}'\n\
-                 whisper.cpp をインストールするか、--whisper オプションでパスを指定してください。",
-                whisper
-            )
-        })?;
-    Ok(())
-}
-
 /// 動画全体を1回だけ whisper で文字起こしし、SRT エントリのリストを返す
 ///
 /// 処理フロー:
-/// 1. ffmpeg で動画全体を 16kHz モノラル PCM WAV に変換（一時ファイル）
-/// 2. whisper.cpp で全体文字起こし（SRT 形式で一時ファイルに出力）
-/// 3. SRT をパースして Vec<SrtEntry> を返す
-/// 4. 一時ファイルを削除
+/// 1. ffmpeg で動画全体を 16kHz モノラル f32le raw バイナリに変換（一時ファイル）
+/// 2. ファイルを読み込み Vec<f32> に変換（4バイト → f32）
+/// 3. whisper-rs でモデルロード・推論
+/// 4. セグメントを Vec<SrtEntry> に変換
+/// 5. 一時 f32 ファイルを削除
 pub fn transcribe_full(
     ffmpeg: &str,
-    whisper: &str,
     model: &Path,
     input: &str,
     language: &str,
     verbose: bool,
 ) -> Result<Vec<SrtEntry>> {
     let tmp_dir = std::env::temp_dir();
-    let tmp_wav = tmp_dir.join("vsp-full.wav");
-    let tmp_srt_base = tmp_dir.join("vsp-full");
-    let tmp_srt = tmp_dir.join("vsp-full.srt");
+    let tmp_f32 = tmp_dir.join("vsp-full.f32");
+    let tmp_f32_str = tmp_f32.to_str().context("Invalid temp f32 path")?;
 
-    let tmp_wav_str = tmp_wav.to_str().context("Invalid temp WAV path")?;
-    let tmp_srt_base_str = tmp_srt_base.to_str().context("Invalid temp SRT base path")?;
-
-    // ffmpeg で全体を 16kHz モノラル PCM WAV に変換
+    // Step 1: ffmpeg で動画全体を 16kHz モノラル f32le に変換
     let mut ffmpeg_cmd = Command::new(ffmpeg);
     ffmpeg_cmd.args([
-        "-y", "-i", input, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", tmp_wav_str,
+        "-y", "-i", input, "-ar", "16000", "-ac", "1", "-f", "f32le", tmp_f32_str,
     ]);
 
     if verbose {
         eprintln!(
-            "  Running: {} -y -i {} -ar 16000 -ac 1 -c:a pcm_s16le {}",
-            ffmpeg, input, tmp_wav_str
+            "  Running: {} -y -i {} -ar 16000 -ac 1 -f f32le {}",
+            ffmpeg, input, tmp_f32_str
         );
     }
 
     let conv_output = ffmpeg_cmd
         .output()
-        .with_context(|| "FFmpeg の実行に失敗しました（全体 WAV 変換）")?;
+        .with_context(|| "FFmpeg の実行に失敗しました（全体 f32 変換）")?;
 
     if !conv_output.status.success() {
-        let _ = std::fs::remove_file(&tmp_wav);
+        let _ = std::fs::remove_file(&tmp_f32);
         let stderr = String::from_utf8_lossy(&conv_output.stderr);
         bail!(
-            "FFmpeg WAV 変換に失敗しました（exit code: {:?}）\nstderr:\n{}",
+            "FFmpeg f32 変換に失敗しました（exit code: {:?}）\nstderr:\n{}",
             conv_output.status.code(),
             stderr
         );
     }
 
-    // whisper.cpp で全体文字起こし（SRT 形式で出力）
-    let model_str = model.to_str().context("Invalid model path")?;
+    // Step 2: ファイルを読み込み Vec<f32> に変換
+    let bytes = std::fs::read(&tmp_f32)
+        .with_context(|| format!("f32 ファイルの読み込みに失敗しました: {}", tmp_f32.display()))?;
+    let _ = std::fs::remove_file(&tmp_f32);
 
-    let mut whisper_cmd = Command::new(whisper);
-    whisper_cmd.args([
-        "-m",
-        model_str,
-        "-f",
-        tmp_wav_str,
-        "-l",
-        language,
-        "-osrt",
-        "-of",
-        tmp_srt_base_str,
-    ]);
+    let samples: Vec<f32> = bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .collect();
+
+    // Step 3: whisper-rs でモデルロード・推論
+    let model_str = model.to_str().context("Invalid model path")?;
+    let ctx = WhisperContext::new_with_params(model_str, WhisperContextParameters::default())
+        .map_err(|e| anyhow::anyhow!("whisper モデルの読み込みに失敗しました: {:?}", e))?;
+    let mut state = ctx
+        .create_state()
+        .map_err(|e| anyhow::anyhow!("whisper state の作成に失敗しました: {:?}", e))?;
+
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    let lang_opt = if language == "auto" { None } else { Some(language) };
+    params.set_language(lang_opt);
+    params.set_print_special(false);
+    params.set_print_progress(false);
 
     if verbose {
-        eprintln!(
-            "  Running: {} -m {} -f {} -l {} -osrt -of {}",
-            whisper, model_str, tmp_wav_str, language, tmp_srt_base_str
-        );
+        eprintln!("  Running whisper inference (language: {:?})...", lang_opt);
     }
 
-    let whisper_result = whisper_cmd
-        .output()
-        .with_context(|| "whisper.cpp の実行に失敗しました");
+    state
+        .full(params, &samples)
+        .map_err(|e| anyhow::anyhow!("whisper 推論に失敗しました: {:?}", e))?;
 
-    // 成功・失敗にかかわらず一時 WAV を削除
-    let _ = std::fs::remove_file(&tmp_wav);
-
-    let whisper_output = whisper_result?;
-
-    if !whisper_output.status.success() {
-        let _ = std::fs::remove_file(&tmp_srt);
-        let stderr = String::from_utf8_lossy(&whisper_output.stderr);
-        bail!(
-            "whisper.cpp の実行に失敗しました（exit code: {:?}）\nstderr:\n{}",
-            whisper_output.status.code(),
-            stderr
-        );
+    // Step 4: セグメントを Vec<SrtEntry> に変換
+    let n = state.full_n_segments();
+    let mut entries = Vec::new();
+    for i in 0..n {
+        let Some(seg) = state.get_segment(i) else {
+            continue;
+        };
+        // start_timestamp / end_timestamp はセンチ秒（1/100 秒）単位 → × 10 でミリ秒
+        let start_ms = (seg.start_timestamp() * 10) as u64;
+        let end_ms = (seg.end_timestamp() * 10) as u64;
+        let text = seg
+            .to_str()
+            .map_err(|e| anyhow::anyhow!("segment text の取得に失敗しました: {:?}", e))?
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            continue;
+        }
+        entries.push(SrtEntry { start_ms, end_ms, text });
     }
 
-    // SRT ファイルを読み込み・パース
-    let srt_content = std::fs::read_to_string(&tmp_srt)
-        .with_context(|| format!("SRT ファイルの読み込みに失敗しました: {}", tmp_srt.display()))?;
-
-    let _ = std::fs::remove_file(&tmp_srt);
-
-    Ok(parse_srt(&srt_content))
+    Ok(entries)
 }
 
 /// セグメントの時間範囲 [start_s, end_s) に対応する SRT エントリを抽出し、
