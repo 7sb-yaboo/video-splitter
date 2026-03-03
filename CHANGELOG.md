@@ -1,56 +1,79 @@
-# Changelog
+# 変更履歴
 
-All notable changes to this project will be documented in this file.
+このプロジェクトの重要な変更はすべてこのファイルに記録されます。
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+フォーマットは [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) に基づき、
+バージョン管理は [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に準拠しています。
+
+## [0.1.1] - 2026-03-04
+
+### 追加
+
+#### summarize-video スキル
+- `scripts/download_model.py`: Whisper GGML モデルの一覧表示・自動ダウンロードスクリプト
+  - `--list`: 利用可能な5モデル（tiny / base / small / medium / large-v3）を推奨マーク付きで表示
+  - `--model <name>`: 指定モデルを `~/.cache/whisper/` へダウンロード（プログレスバー付き）
+  - `--dest <dir>`: 保存先ディレクトリを変更
+  - `--quiet`: 保存先パスのみ stdout へ出力（Claude による自動利用向け）
+  - 既存ファイルはスキップ、ネットワークエラー・中断時は部分ファイルを自動削除
+
+### 変更
+
+#### summarize-video スキル
+- `SKILL.md` Step 1 に Whisper モデル確認フローを追加（未指定時はモデル候補を提示しダウンロードまで誘導）
+- `references/setup.md` セクション 2 をスクリプト経由の手順に更新（wget コマンド列挙から変更）
+- `SKILL.md` の YAML frontmatter を修正
+
+### その他
+- `sample_data/` と `tasks/` を `.gitignore` のローカル専用エントリに移動
+
+---
 
 ## [0.1.0] - 2026-03-03
 
-### Added
+### 追加
 
-#### Core splitting
-- Silence-based video splitting using FFmpeg `silencedetect` filter
-- `--interval` / `-i`: target split interval (default: 600 s)
-- `--silence-threshold` / `-t`: dB threshold for silence detection (default: -30 dB)
-- `--silence-duration` / `-d`: minimum silence duration to consider (default: 0.5 s)
-- `--output-dir` / `-o`: output directory for split segments
-- Accurate seek mode (`-ss` after `-i`) with `-avoid_negative_ts make_zero`
+#### コア分割機能
+- FFmpeg `silencedetect` フィルターによる無音区間での動画分割
+- `--interval` / `-i`: 目標分割間隔（デフォルト: 600 秒）
+- `--silence-threshold` / `-t`: 無音判定の dB 閾値（デフォルト: -30 dB）
+- `--silence-duration` / `-d`: 無音と見なす最小継続時間（デフォルト: 0.5 秒）
+- `--output-dir` / `-o`: 分割セグメントの出力先ディレクトリ
+- アキュレートシークモード（`-ss` を `-i` の後に配置）と `-avoid_negative_ts make_zero` の組み合わせ
 
-#### Transcription (whisper-rs, built-in)
-- Built-in speech-to-text via [whisper-rs](https://github.com/tazz4843/whisper-rs) 0.15 (no external binary needed)
-- `--model` / `-m`: path to GGML model file
-- `--language` / `-l`: language code passed to Whisper (default: `ja`)
-- Per-segment SRT generation stored alongside each video segment
-- `--no-transcribe`: skip transcription and produce video-only segments
+#### 文字起こし機能（whisper-rs 組み込み）
+- [whisper-rs](https://github.com/tazz4843/whisper-rs) 0.15 による組み込み音声認識（外部バイナリ不要）
+- `--model` / `-m`: GGML モデルファイルのパス
+- `--language` / `-l`: Whisper に渡す言語コード（デフォルト: `ja`）
+- セグメントごとの SRT ファイルを動画ファイルと同じ場所に保存
+- `--no-transcribe`: 文字起こしをスキップして動画のみを出力
 
-#### Scene change detection
-- `--split-on-scene`: additionally split at scene changes detected via `showinfo` filter
-- `--scene-threshold`: sensitivity for scene change (0.0–1.0, default: 0.4)
+#### シーン変化検出
+- `--split-on-scene`: `showinfo` フィルターで検出したシーン変化点でも分割
+- `--scene-threshold`: シーン変化の感度（0.0〜1.0、デフォルト: 0.4）
 
-#### Transcript search
-- `--search <QUERY>`: full-text search across all SRT transcripts in output directory
-- JSON output with segment path, timestamp, and matched text
+#### トランスクリプト検索
+- `--search <クエリ>`: 出力ディレクトリ内の全 SRT ファイルを横断全文検索
+- セグメントパス・タイムスタンプ・マッチテキストを JSON で出力
 
-#### Frame extraction
-- `--extract-frames`: extract one keyframe per segment as JPEG
-- Frames stored in `frames/` sub-directory of each segment folder
+#### フレーム抽出
+- `--extract-frames`: セグメントごとにキーフレームを JPEG で1枚抽出
+- フレームは各セグメントフォルダ内の `frames/` サブディレクトリに保存
 
-#### Manifest
-- `manifest.json` generated automatically after splitting
-- Lists all segments with path, duration, transcript path, and frame paths
-- `--no-manifest`: suppress manifest generation
+#### マニフェスト
+- 分割完了後に `manifest.json` を自動生成
+- 各セグメントのパス・尺・トランスクリプトパス・フレームパスを記録
+- `--no-manifest`: マニフェスト生成を抑制
 
-#### MCP server
-- `mcp/server.py`: Python MCP server exposing `process_video`, `list_segments`,
-  `get_segment`, and `search_transcript` tools
-- Compatible with Claude Desktop and any MCP-capable client
+#### MCP サーバー
+- `mcp/server.py`: `process_video`・`list_segments`・`get_segment`・`search_transcript` ツールを提供する Python MCP サーバー
+- Claude Desktop およびあらゆる MCP 対応クライアントと互換
 
-### Technical notes
+### 技術的な注意事項
 
-- Requires FFmpeg in `PATH`
-- Whisper model files (GGML format) must be downloaded separately — see README
-- Building from source requires LLVM/libclang for `whisper-rs-sys`
-  - Windows: `winget install LLVM.LLVM` then set `LIBCLANG_PATH`
+- FFmpeg が `PATH` に存在する必要があります
+- Whisper モデルファイル（GGML 形式）は別途ダウンロードが必要です — README を参照
+- ソースからビルドする場合は `whisper-rs-sys` のために LLVM/libclang が必要です
+  - Windows: `winget install LLVM.LLVM` 後に `LIBCLANG_PATH` を設定
   - Linux: `apt install clang libclang-dev cmake`
   - macOS: `brew install llvm cmake`
